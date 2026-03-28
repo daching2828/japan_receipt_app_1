@@ -1,0 +1,18 @@
+# ★ 最重要：絕對不能上傳到 GitHub
+.streamlit/secrets.toml
+
+# Python 暫存
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+
+# 辨識結果（個人資料，不上傳）
+*_result.json
+
+# 本機暫存圖片
+*.tmp
+
+# 系統檔
+.DS_Store
+Thumbs.db

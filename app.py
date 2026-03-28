@@ -1,12 +1,11 @@
 """
 =============================================================
-  app.py — Streamlit UI（v1.3 強化版）
+  app.py — Streamlit UI（v1.4 修正版）
 
-  Secret 讀取優先順序：
-  1. st.secrets（Streamlit Cloud 或標準本機路徑）
-  2. toml.load() 手動讀取（本機 .streamlit/secrets.toml 備案）
-  3. 環境變數 os.environ
-  4. 側欄手動輸入
+  v1.4 修正：
+  - _do_notion_sync 移到呼叫點之前（修正 Python 定義順序問題）
+  - date 為 null 時改用今天日期，不傳空字串給 Notion
+  - 同步失敗時展開完整錯誤訊息，不再靜默吞掉
 =============================================================
 """
 
@@ -19,91 +18,67 @@ from pathlib import Path
 
 
 # ─────────────────────────────────────────────
-#  ★ 最優先執行：手動讀取 secrets.toml 作為備案
-#    必須在任何 st.secrets 呼叫之前完成
+#  Secret 讀取（toml 備案 + st.secrets + 環境變數）
 # ─────────────────────────────────────────────
 def _load_toml_secrets() -> dict:
-    """
-    依序嘗試三個路徑讀取 secrets.toml。
-    支援 Python 3.11+ 內建 tomllib、tomli、toml 三種套件。
-    全部找不到或解析失敗時靜默回傳 {}，不會讓 App 崩潰。
-    """
     candidates = [
         Path.cwd() / ".streamlit" / "secrets.toml",
         Path(__file__).parent / ".streamlit" / "secrets.toml",
         Path.home() / ".streamlit" / "secrets.toml",
     ]
-
     for p in candidates:
         if not p.exists():
             continue
-        # 嘗試三種 toml 解析器（依安裝狀況自動選擇）
         try:
-            import tomllib                          # Python 3.11+ 內建
+            import tomllib
             with open(p, "rb") as f:
                 return tomllib.load(f)
         except ImportError:
             pass
         try:
-            import tomli                            # pip install tomli
+            import tomli
             with open(p, "rb") as f:
                 return tomli.load(f)
         except ImportError:
             pass
         try:
-            import toml                             # pip install toml
+            import toml
             return toml.load(str(p))
         except ImportError:
             pass
-        # 有找到檔案但三個套件都沒裝：回傳空 dict
         return {}
-
-    return {}   # 所有路徑都不存在
+    return {}
 
 
 _TOML_SECRETS: dict = _load_toml_secrets()
 
 
 def get_secret(key: str) -> str | None:
-    """
-    依優先順序讀取 secret，永不拋出例外。
-    """
-    try:                              # 1. Streamlit 原生 secrets
+    try:
         return st.secrets[key]
     except Exception:
         pass
-    if key in _TOML_SECRETS:          # 2. 手動讀取的 toml
+    if key in _TOML_SECRETS:
         return str(_TOML_SECRETS[key])
-    return os.environ.get(key, None)  # 3. 環境變數
+    return os.environ.get(key, None)
 
 
 def _secrets_debug_info() -> str:
-    """產生完整的除錯路徑說明，給使用者看"""
     cwd        = Path.cwd()
     script_dir = Path(__file__).parent
-    found_toml = "（找到 ✅）" if _TOML_SECRETS else "（找不到 ❌）"
-
+    found      = "找到 ✅" if _TOML_SECRETS else "找不到 ❌"
     return "\n".join([
-        "#### 目前程式找尋 `secrets.toml` 的完整路徑（依序）：",
+        "#### 程式找尋 `secrets.toml` 的路徑：",
         f"1. `{cwd / '.streamlit' / 'secrets.toml'}`",
         f"2. `{script_dir / '.streamlit' / 'secrets.toml'}`",
         f"3. `{Path.home() / '.streamlit' / 'secrets.toml'}`",
-        "",
-        f"手動讀取結果：{found_toml}",
-        f"目前執行目錄：`{cwd}`",
-        f"app.py 所在：`{script_dir}`",
-        f"Python 版本：`{sys.version.split()[0]}`",
-        "",
-        "**請確認 `secrets.toml` 放在上方任一路徑，內容為：**",
-        "```toml",
-        'GEMINI_API_KEY = "AIza-你的金鑰"',
-        'NOTION_TOKEN   = "secret_你的Token"',
-        "```",
+        f"\n手動讀取結果：{found}",
+        f"執行目錄：`{cwd}`",
     ])
 
 
 # ─────────────────────────────────────────────
-#  其餘 import
+#  Import
 # ─────────────────────────────────────────────
 from receipt_api import recognize_receipt, DEFAULT_JPY_TO_TWD_RATE
 from notion_sync import sync_to_notion, check_duplicate, NotionSyncError
@@ -130,6 +105,54 @@ st.markdown("""
 
 
 # ─────────────────────────────────────────────
+#  ★ Notion 同步函數（必須在呼叫點之前定義）
+# ─────────────────────────────────────────────
+def _do_notion_sync(result: dict, category: str, token: str, rate: float):
+    """執行 Notion 同步，含重複偵測與完整錯誤顯示"""
+    from datetime import date as _date
+
+    store_name   = result.get("store_name", {}).get("chinese", "未知店家")
+    receipt_date = result.get("date") or _date.today().isoformat()  # null → 今天
+    total_jpy    = result.get("total_amount_jpy", 0) or 0
+
+    with st.spinner("📤 正在同步到 Notion..."):
+
+        # 重複偵測（只在有日期時做）
+        try:
+            dup_id = check_duplicate(store_name, receipt_date, total_jpy, token)
+            if dup_id:
+                st.warning(
+                    f"⚠️ 偵測到可能重複記錄（同日期 + 同金額），已略過。\n"
+                    f"Page ID：{dup_id}"
+                )
+                return
+        except Exception as e:
+            # 重複偵測失敗不阻擋寫入，只記錄警告
+            st.warning(f"⚠️ 重複偵測略過（{e}），繼續同步...")
+
+        # 寫入 Notion
+        try:
+            page = sync_to_notion(
+                receipt_data=result,
+                category=category,
+                notion_token=token,
+                jpy_to_twd_rate=rate,
+            )
+            st.session_state["notion_synced"]   = True
+            st.session_state["notion_page_url"] = page.get("url", "")
+            st.success("✅ 同步成功！")
+            st.rerun()
+
+        except NotionSyncError as e:
+            st.error(f"❌ Notion 同步失敗")
+            st.code(str(e), language=None)   # 展開完整錯誤，方便 debug
+
+        except Exception as e:
+            st.error(f"❌ 未知錯誤")
+            st.code(f"{type(e).__name__}: {e}", language=None)
+
+
+# ─────────────────────────────────────────────
 #  側欄
 # ─────────────────────────────────────────────
 with st.sidebar:
@@ -145,7 +168,7 @@ with st.sidebar:
             "Gemini API Key", type="password", placeholder="AIza..."
         )
         if not gemini_key:
-            with st.expander("❓ 找不到 Key？點此查看除錯資訊"):
+            with st.expander("❓ 找不到 Key？點此除錯"):
                 st.markdown(_secrets_debug_info())
 
     if notion_token:
@@ -186,6 +209,7 @@ st.markdown('<div class="subtitle">拍照即辨識 · 自動翻中文 · 同步 
 
 col1, col2 = st.columns([1, 1], gap="large")
 
+# ── 左欄 ────────────────────────────────────
 with col1:
     st.markdown("### 📷 上傳收據")
     st.info("📱 手機用戶：點擊下方按鈕可直接選擇「相機拍照」！")
@@ -207,6 +231,7 @@ with col1:
         recognize_btn = False
 
 
+# ── 右欄 ────────────────────────────────────
 with col2:
     st.markdown("### 📋 辨識結果")
 
@@ -231,7 +256,7 @@ with col2:
                 st.session_state["last_category"] = category
                 st.session_state["notion_synced"] = False
             except Exception as e:
-                st.error(f"❌ 辨識失敗：{str(e)}")
+                st.error(f"❌ 辨識失敗：{e}")
             finally:
                 os.unlink(tmp_path)
 
@@ -240,6 +265,7 @@ with col2:
 
         if "error" in result:
             st.error(f"解析錯誤：{result['error']}")
+            st.code(result.get("raw_response", ""), language=None)
         else:
             store = result.get("store_name", {})
             st.markdown(f"""
@@ -276,17 +302,6 @@ with col2:
                 </div>
             </div>""", unsafe_allow_html=True)
 
-            confidence = result.get("confidence", {})
-            score = confidence.get("overall", 0) or 0
-            color = "#00b894" if score >= 80 else "#fdcb6e" if score >= 60 else "#d63031"
-            st.markdown(
-                f'<span style="background:{color};color:white;padding:0.2rem 0.8rem;'
-                f'border-radius:1rem;font-size:0.85rem;">🎯 辨識信心：{score}/100</span>',
-                unsafe_allow_html=True
-            )
-            if confidence.get("notes"):
-                st.caption(f"⚠️ {confidence['notes']}")
-
             st.divider()
 
             c1, c2, c3 = st.columns(3)
@@ -310,7 +325,12 @@ with col2:
                         if not notion_token:
                             st.error("❌ 請先設定 Notion Token（見左側側欄）")
                         else:
-                            _do_notion_sync(result, category, notion_token, jpy_rate)
+                            _do_notion_sync(   # ← 此時函數已定義 ✅
+                                result,
+                                st.session_state.get("last_category", category),
+                                notion_token,
+                                jpy_rate,
+                            )
             with c3:
                 if st.button("🔄 重新辨識", use_container_width=True):
                     for k in ["last_result", "notion_synced", "notion_page_url"]:
@@ -318,40 +338,6 @@ with col2:
                     st.rerun()
     else:
         st.info("👈 上傳收據並點擊「開始辨識」")
-
-
-# ─────────────────────────────────────────────
-#  Notion 同步邏輯
-# ─────────────────────────────────────────────
-def _do_notion_sync(result: dict, category: str, token: str, rate: float):
-    store_name   = result.get("store_name", {}).get("chinese", "")
-    receipt_date = result.get("date") or ""
-    total_jpy    = result.get("total_amount_jpy", 0) or 0
-
-    with st.spinner("📤 正在同步到 Notion..."):
-        if receipt_date:
-            dup_id = check_duplicate(store_name, receipt_date, total_jpy, token)
-            if dup_id:
-                st.warning(
-                    f"⚠️ 偵測到可能重複記錄（同日期 + 同金額），已略過。\n"
-                    f"Page ID：{dup_id}"
-                )
-                return
-        try:
-            page = sync_to_notion(
-                receipt_data=result,
-                category=category,
-                notion_token=token,
-                jpy_to_twd_rate=rate,
-            )
-            st.session_state["notion_synced"]   = True
-            st.session_state["notion_page_url"] = page.get("url", "")
-            st.success("✅ 同步成功！")
-            st.rerun()
-        except NotionSyncError as e:
-            st.error(f"❌ 同步失敗\n\n{str(e)}")
-        except Exception as e:
-            st.error(f"❌ 未知錯誤：{str(e)}")
 
 
 # ─────────────────────────────────────────────

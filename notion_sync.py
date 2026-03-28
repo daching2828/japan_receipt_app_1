@@ -31,7 +31,7 @@ from typing import Optional
 # ─────────────────────────────────────────────
 #  設定
 # ─────────────────────────────────────────────
-NOTION_DATABASE_ID = "3307a8578fa180b6832bc992203e5a81"
+NOTION_DATABASE_ID = "3307a8578fa180ec9f7adb3660b81c5e"
 NOTION_API_VERSION = "2022-06-28"
 NOTION_API_BASE = "https://api.notion.com/v1"
 
@@ -262,11 +262,13 @@ def _post_to_notion(payload: dict, token: str) -> dict:
         except Exception:
             msg, code = body, "parse_error"
         raise NotionSyncError(
-            f"Notion API 錯誤 {e.code} [{code}]：{msg}\n"
-            f"請確認：\n"
-            f"  1. Token 是否正確（secret_xxx）\n"
-            f"  2. Integration 是否已連接到此 Database\n"
-            f"  3. 欄位名稱是否與 Notion 完全一致（含全形/半形）"
+            f"Notion API 錯誤 {e.code} [{code}]：{msg}\n\n"
+            f"最可能的原因：\n"
+            f"  1. Integration 尚未連接到此 Database\n"
+            f"     → 打開 Notion Database → 右上角 ⋯ → Connections → 新增你的 Integration\n"
+            f"  2. Token 已失效，請到 notion.so/my-integrations 重新產生\n"
+            f"     （ntn_ 和 secret_ 開頭都是正確格式）\n"
+            f"  3. 欄位名稱與 Notion 不一致（含全形/半形空格）"
         ) from e
 
     except urllib.error.URLError as e:

@@ -28,7 +28,7 @@ from receipt_prompt import RECEIPT_SYSTEM_PROMPT, RECEIPT_USER_PROMPT
 # ─────────────────────────────────────────────
 #  設定區塊
 # ─────────────────────────────────────────────
-MODEL = "gemini-2.5-flash-preview-04-17"
+MODEL = "gemini-2.5-flash-latest"
 
 # 預設匯率
 DEFAULT_JPY_TO_TWD_RATE = 0.218  # 約 1 JPY ≈ 0.218 TWD（2025 參考值）

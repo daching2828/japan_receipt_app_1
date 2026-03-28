@@ -12,12 +12,11 @@
   ├─────────────────┼──────────────┼───────────────────────┤
   │ 店名            │ Title        │ store_name.chinese     │
   │ 日期            │ Date         │ date                   │
-  │ 消費項目清單    │ Rich Text    │ items 陣列格式化       │
+  │ 消費明細        │ Rich Text    │ items 陣列格式化       │
   │ 日幣金額        │ Number(Yen)  │ total_amount_jpy       │
   │ 台幣預估        │ Formula      │ 自動計算（Notion端）   │
   │ 分類            │ Select       │ category（App選擇）    │
   │ 支付方式        │ Select       │ payment_method         │
-  │ 辨識信心        │ Number       │ confidence.overall     │
   └─────────────────┴──────────────┴───────────────────────┘
 =============================================================
 """
@@ -100,10 +99,6 @@ def _build_payload(
     # 分類：去除 emoji 前綴
     category_clean = category.split(" ", 1)[-1] if " " in category else category
 
-    # 辨識信心
-    confidence = receipt.get("confidence", {})
-    confidence_score = confidence.get("overall", 0) or 0
-
     properties = {
         # ── Title（店名）──────────────────────────
         "店名": {
@@ -123,8 +118,8 @@ def _build_payload(
             }
         },
 
-        # ── Rich Text（消費項目清單）──────────────
-        "消費項目清單": {
+        # ── Rich Text（消費明細）──────────────
+        "消費明細": {
             "rich_text": [
                 {
                     "text": {
@@ -153,15 +148,11 @@ def _build_payload(
             }
         },
 
-        # ── Number（辨識信心，開發期間保留，上線後可移除）──
-        "辨識信心": {
-            "number": confidence_score
-        },
     }
 
     # 若有店家日文名稱，附加在 Rich Text 備註欄
     if store_japanese:
-        properties["消費項目清單"]["rich_text"][0]["text"]["content"] = (
+        properties["消費明細"]["rich_text"][0]["text"]["content"] = (
             f"【{store_japanese}】\n" + items_text
         )[:2000]
 

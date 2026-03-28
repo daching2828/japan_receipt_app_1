@@ -31,7 +31,7 @@ from typing import Optional
 # ─────────────────────────────────────────────
 #  設定
 # ─────────────────────────────────────────────
-NOTION_DATABASE_ID = "3307a8578fa180ec9f7adb3660b81c5e"
+NOTION_DATABASE_ID = "3307a8578fa180f4ad12e0f5419aca3d"
 NOTION_API_VERSION = "2022-06-28"
 NOTION_API_BASE = "https://api.notion.com/v1"
 
